@@ -3,6 +3,7 @@ title: "COVID-19 Forecast"
 output: 
   flexdashboard::flex_dashboard:
     social: menu
+    theme: flatly
 runtime: shiny
 ---
 
@@ -25,7 +26,7 @@ library(glmnet)
 library(randomForest)
 options(scipen=999)
 
-data_daily  <- read.csv("./data/owid-covid-data.csv")
+data_daily  <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/owid-covid-data.csv")
 
 covid19_confirmed_global <- reactive({
   
