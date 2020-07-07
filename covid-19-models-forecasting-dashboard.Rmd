@@ -1,0 +1,258 @@
+---
+title: "COVID-19 Forecast"
+output: 
+  flexdashboard::flex_dashboard:
+    social: menu
+runtime: shiny
+---
+
+
+```{r setup, include=FALSE}
+library(shinythemes)
+library(flexdashboard)
+library(shinyWidgets)
+library(shiny)
+library(plotly)
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
+library(timetk)   
+library(lubridate)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(glmnet)
+library(randomForest)
+options(scipen=999)
+
+data_daily  <- read.csv("./data/owid-covid-data.csv")
+
+covid19_confirmed_global <- reactive({
+  
+    data_daily <- data_daily[data_daily$location == input$country,]
+    time_series_covid19_confirmed_global <- data_daily %>% select(date, new_cases) %>% drop_na(new_cases)
+    time_series_covid19_confirmed_global <- aggregate(data_daily$new_cases, by=list(date=data_daily$date), FUN=sum)
+    
+    covid19_confirmed_global <- time_series_covid19_confirmed_global %>%
+      select(date, x) %>%
+      rename(value=x)
+    
+    covid19_confirmed_global$date <- as.Date(covid19_confirmed_global$date, format = "%Y-%m-%d")
+    covid19_confirmed_global
+})
+
+covid19_confirmed_global_tbl <- reactive({
+  
+  covid19_confirmed_global_tbl <- covid19_confirmed_global()
+  as.tibble(covid19_confirmed_global_tbl)
+})
+
+splits <- reactive({
+  covid19_confirmed_global_tbl() %>%
+    time_series_split(assess = paste(input$testing, "days"), cumulative = TRUE)
+})
+
+calibration_table <- reactive({
+
+  model_fit_arima <- arima_reg() %>%
+  set_engine("auto_arima") %>%
+  fit(value ~ date, training(splits()))
+  
+  # model_fit_arima
+  
+  model_fit_prophet <- prophet_reg() %>%
+    set_engine("prophet", yearly.seasonality = input$yearly_seasonality, weekly.seasonality = input$weekly_seasonality, daily.seasonality = input$daily_seasonality) %>%
+    fit(value ~ date, training(splits()))
+  
+  # model_fit_prophet
+  
+  recipe_spec <- recipe(value ~ date, training(splits())) %>%
+    step_timeseries_signature(date) %>%
+    step_rm(contains("am.pm"), contains("hour"), contains("minute"),
+            contains("second"), contains("xts")) %>%
+    step_fourier(date, period = 365, K = 5) %>%
+    step_dummy(all_nominal())
+  
+  # recipe_spec %>% prep() %>% juice()
+  
+  model_spec_glmnet <- linear_reg(penalty = 0.01, mixture = 0.5) %>%
+    set_engine("glmnet")
+  
+  workflow_fit_glmnet <- workflow() %>%
+    add_model(model_spec_glmnet) %>%
+    add_recipe(recipe_spec %>% step_rm(date)) %>%
+    fit(training(splits()))
+  
+  model_spec_rf <- rand_forest(trees = input$random_forest_trees, min_n = input$random_forest_min_n) %>%
+    set_engine("randomForest")
+  
+  workflow_fit_rf <- workflow() %>%
+    add_model(model_spec_rf) %>%
+    add_recipe(recipe_spec %>% step_rm(date)) %>%
+    fit(training(splits()))
+  
+  model_spec_prophet_boost <- prophet_boost() %>%
+    set_engine("prophet_xgboost", yearly.seasonality = input$yearly_seasonality, weekly.seasonality = input$weekly_seasonality, daily.seasonality = input$daily_seasonality) 
+  
+  workflow_fit_prophet_boost <- workflow() %>%
+    add_model(model_spec_prophet_boost) %>%
+    add_recipe(recipe_spec) %>%
+    fit(training(splits()))
+  
+  # workflow_fit_prophet_boost
+  
+  model_table <- modeltime_table(
+    model_fit_arima, 
+    model_fit_prophet,
+    workflow_fit_glmnet,
+    workflow_fit_rf,
+    workflow_fit_prophet_boost
+  ) 
+  
+  # model_table
+  
+  calibration_table <- model_table %>%
+    modeltime_calibrate(testing(splits()))
+  
+  calibration_table
+})
+```
+
+
+Forecast {data-orientation=rows}
+=====================================  
+
+Column {.sidebar}
+-------------------------------------
+### Forecast configuration
+```{r}
+renderUI({
+  models <- calibration_table() %>% collect %>% .[[".model_id"]]
+  names(models) <- calibration_table() %>% collect %>% .[[".model_desc"]]
+  
+  selectInput('model', 'Model', models)
+})
+
+checkboxInput('all_models', 'All models', value = TRUE)
+
+numericInput('forecast', 'Months as the forecast set', 3,
+              min = 1, max = 12)
+```
+Use the __Model builder__ tab to build, train and test your models.
+
+Use the __Forecast__ tab to examine your forecasts.  
+
+Application author: [Adrien BORDERON](https://www.linkedin.com/in/aborderon/)
+
+
+Row {data-height=600}
+-------------------------------------
+    
+### Forecast
+    
+```{r}
+renderPlotly({
+  
+  if (input$all_models == FALSE) {
+    calibration_table() %>%
+    
+    filter(.model_id == input$model) %>%
+  
+    # Refit and Forecast Forward
+    modeltime_refit(covid19_confirmed_global_tbl()) %>%
+    modeltime_forecast(h = paste(input$forecast, "months"), actual_data = covid19_confirmed_global_tbl()) %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+  } else {
+    calibration_table() %>%
+  
+    # Refit and Forecast Forward
+    modeltime_refit(covid19_confirmed_global_tbl()) %>%
+    modeltime_forecast(h = paste(input$forecast, "months"), actual_data = covid19_confirmed_global_tbl()) %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+  }
+})
+```
+
+Model builder {data-orientation=rows}
+=====================================
+Column {.sidebar}
+-------------------------------------
+### Dataset configuration
+```{r}
+selectInput('country', 'Country filter', unique(data_daily$location), selected= "France")
+
+numericInput('testing', 'Days as the testing set', 5,
+              min = 1, max = 60)
+```
+
+### Prophet and XGBoost 
+```{r}
+selectInput("yearly_seasonality", "Yearly seasonality",
+                c("Auto" = 'auto',
+                  "True" = TRUE,
+                  "False" = FALSE), selected= TRUE)
+
+selectInput("weekly_seasonality", "Weekly seasonality",
+                c("Auto" = 'auto',
+                  "True" = TRUE,
+                  "False" = FALSE), selected= 'auto')
+
+selectInput("daily_seasonality", "Daily seasonality",
+                c("Auto" = 'auto',
+                  "True" = TRUE,
+                  "False" = FALSE), selected= 'auto')
+```
+
+### Random Forest
+```{r}
+numericInput('random_forest_trees', 'Number of trees', 500)
+numericInput('random_forest_min_n', 'Minimum number of data points in a node', 50)
+```
+   
+Row  {data-height=600}
+-------------------------------------
+   
+### COVID-19 new daily cases
+
+```{r}
+renderPlotly({
+  covid19_confirmed_global_tbl() %>%
+    plot_time_series(date, value, .interactive = FALSE)
+})
+
+```
+
+### Train/test split time serie
+    
+```{r}
+
+renderPlotly({
+  splits() %>%
+    tk_time_series_cv_plan() %>%
+    plot_time_series_cv_plan(date, value, .interactive = FALSE)
+})
+```
+
+Row  {data-height=600}
+-------------------------------------
+   
+### Forecast (Testing Set)
+
+```{r}
+renderPlotly({
+  calibration_table() %>%
+    modeltime_forecast() %>%
+    plot_modeltime_forecast(.interactive = FALSE)
+})
+
+```
+
+### Accuracy (Testing Set)
+    
+```{r}
+renderTable({
+  calibration_table() %>%
+    modeltime_accuracy() %>%
+    table_modeltime_accuracy(.interactive = FALSE)
+})
+```
