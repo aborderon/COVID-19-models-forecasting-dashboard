@@ -23,6 +23,7 @@ library(readr)
 library(dplyr)
 library(tidyr)
 library(glmnet)
+library(DT)
 library(randomForest)
 options(scipen=999)
 
@@ -31,12 +32,12 @@ data_daily  <- read.csv("https://raw.githubusercontent.com/owid/covid-19-data/ma
 covid19_confirmed_global <- reactive({
   
     data_daily <- data_daily[data_daily$location == input$country,]
-    time_series_covid19_confirmed_global <- data_daily %>% select(date, new_cases) %>% drop_na(new_cases)
-    time_series_covid19_confirmed_global <- aggregate(data_daily$new_cases, by=list(date=data_daily$date), FUN=sum)
+    time_series_covid19_confirmed_global <- data_daily %>% select(date, input$dimension) %>% drop_na(input$dimension)
+    time_series_covid19_confirmed_global <- aggregate(time_series_covid19_confirmed_global[input$dimension], by=list(date=time_series_covid19_confirmed_global$date), FUN=sum)
     
     covid19_confirmed_global <- time_series_covid19_confirmed_global %>%
-      select(date, x) %>%
-      rename(value=x)
+      select(date, input$dimension) %>%
+      rename(value=input$dimension)
     
     covid19_confirmed_global$date <- as.Date(covid19_confirmed_global$date, format = "%Y-%m-%d")
     covid19_confirmed_global
@@ -120,10 +121,10 @@ calibration_table <- reactive({
 ```
 
 
-Forecast {data-orientation=rows}
+Forecast {data-orientation=rows, data-icon="fa-line-chart"}
 =====================================  
 
-Column {.sidebar}
+Configuration {.sidebar}
 -------------------------------------
 ### Forecast configuration
 ```{r}
@@ -138,12 +139,22 @@ checkboxInput('all_models', 'All models', value = TRUE)
 
 numericInput('forecast', 'Months as the forecast set', 3,
               min = 1, max = 12)
+
+strong(hr())
 ```
 Use the __Model builder__ tab to build, train and test your models.
 
 Use the __Forecast__ tab to examine your forecasts.  
 
 Application author: [Adrien BORDERON](https://www.linkedin.com/in/aborderon/)
+
+```{r}
+strong(hr())
+```
+
+### Data Source
+
+[Our World in Data Github](https://ourworldindata.org/coronavirus)
 
 
 Row {data-height=600}
@@ -174,16 +185,25 @@ renderPlotly({
 })
 ```
 
-Model builder {data-orientation=rows}
+Model builder {data-orientation=rows, data-icon="fa-cogs"}
 =====================================
 Column {.sidebar}
 -------------------------------------
 ### Dataset configuration
 ```{r}
-selectInput('country', 'Country filter', unique(data_daily$location), selected= "France")
+selectInput('country', 'Country filter', unique(data_daily$location), selected= "World")
 
-numericInput('testing', 'Days as the testing set', 5,
-              min = 1, max = 60)
+selectInput('dimension', 'Dimension filter', 
+                  c("New cases" = 'new_cases',
+                    "New deaths" = 'new_deaths',
+                    "Total cases" = 'total_cases',
+                    "Total deaths" = 'total_deaths'), selected= 'new_cases')
+
+numericInput('testing', 'Days as the testing set', 30,
+              min = 1, max = 90)
+```
+```{r}
+strong(hr())
 ```
 
 ### Prophet and XGBoost 
@@ -191,17 +211,20 @@ numericInput('testing', 'Days as the testing set', 5,
 selectInput("yearly_seasonality", "Yearly seasonality",
                 c("Auto" = 'auto',
                   "True" = TRUE,
-                  "False" = FALSE), selected= TRUE)
+                  "False" = FALSE), selected= FALSE)
 
 selectInput("weekly_seasonality", "Weekly seasonality",
                 c("Auto" = 'auto',
                   "True" = TRUE,
-                  "False" = FALSE), selected= 'auto')
+                  "False" = FALSE), selected= TRUE)
 
 selectInput("daily_seasonality", "Daily seasonality",
                 c("Auto" = 'auto',
                   "True" = TRUE,
-                  "False" = FALSE), selected= 'auto')
+                  "False" = FALSE), selected= FALSE)
+```
+```{r}
+strong(hr())
 ```
 
 ### Random Forest
@@ -213,7 +236,7 @@ numericInput('random_forest_min_n', 'Minimum number of data points in a node', 5
 Row  {data-height=600}
 -------------------------------------
    
-### COVID-19 new daily cases
+### COVID-19 Dataset
 
 ```{r}
 renderPlotly({
@@ -242,7 +265,7 @@ Row  {data-height=600}
 ```{r}
 renderPlotly({
   calibration_table() %>%
-    modeltime_forecast() %>%
+    modeltime_forecast(actual_data = covid19_confirmed_global_tbl()) %>%
     plot_modeltime_forecast(.interactive = FALSE)
 })
 
@@ -256,4 +279,21 @@ renderTable({
     modeltime_accuracy() %>%
     table_modeltime_accuracy(.interactive = FALSE)
 })
+```
+
+Dataset {data-orientation=rows, data-icon="fa-table"}
+=====================================
+Row {data-height=600}
+-------------------------------------
+### Dataset COVID-19 - Our World in Data
+```{r}
+renderDataTable({
+  dataset <- datatable(data_daily %>% select(date, iso_code, continent, location, total_cases, total_deaths, new_cases, new_deaths),
+                   filter = "top",
+                   options = list(
+                       pageLength = 20
+                   ))
+  dataset
+})
+
 ```
