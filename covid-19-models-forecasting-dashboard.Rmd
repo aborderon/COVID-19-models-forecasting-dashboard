@@ -9,6 +9,8 @@ output:
 runtime: shiny
 resource_files:
 - setup.R
+- covid19_response_icon.png
+- styles.css
 ---
 
 
@@ -141,6 +143,7 @@ renderPlotly({
 
 ```
 
+
 ### Train/test split time serie
     
 ```{r}
@@ -175,6 +178,27 @@ renderTable({
     table_modeltime_accuracy(.interactive = FALSE)
 })
 ```
+
+Anomaly Diagnostics {data-orientation=rows, data-icon="fa-tachometer"}
+=====================================
+Row {data-height=600}
+-------------------------------------
+### Seasonality
+```{r}
+renderPlotly({
+  covid19_confirmed_global_tbl() %>%
+    plot_seasonal_diagnostics(date, value, .interactive = FALSE)
+})
+```
+
+### Autocorrelation, partial autocorrelation
+```{r}
+renderPlotly({
+  covid19_confirmed_global_tbl() %>%
+    plot_acf_diagnostics(date, value, .lags = "1 week", .interactive = FALSE)
+})
+```
+
 
 Dataset {data-orientation=rows, data-icon="fa-table"}
 =====================================
