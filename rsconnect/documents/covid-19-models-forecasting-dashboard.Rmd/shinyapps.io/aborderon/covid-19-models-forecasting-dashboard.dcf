@@ -5,8 +5,9 @@ account: aborderon
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 2544507
-bundleId: 3366176
+bundleId: 3367104
 url: https://aborderon.shinyapps.io/covid-19-models-forecasting-dashboard/
-when: 1594189731.24243
+when: 1594206193.27557
 asMultiple: FALSE
 asStatic: FALSE
+additionalFiles: setup.R
