@@ -1,10 +1,14 @@
 ---
 title: "COVID-19 Forecast"
-output: 
+output:
   flexdashboard::flex_dashboard:
     social: menu
     theme: flatly
+    logo: covid19_response_icon.png
+    css: styles.css
 runtime: shiny
+resource_files:
+- setup.R
 ---
 
 
